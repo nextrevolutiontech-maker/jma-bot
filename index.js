@@ -2,7 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const { MessagingResponse } = require('twilio').twiml;
-
+const PORT = 3000;
 // ── In-memory session stores ──
 const sessions = {};      // voice sessions
 const waSessions = {};    // whatsapp sessions
@@ -109,7 +109,7 @@ function bedroomsToServiceType(bedrooms) {
 }
 
 // ── Step 1: Welcome → Ask for bedrooms ──
-app.post('/voice', (req, res) => {
+app.all('/voice', (req, res) => {
   const callerId = req.body.From || 'unknown';
   sessions[callerId] = {}; // reset session
 
@@ -218,7 +218,7 @@ app.post('/voice/step-sqft', async (req, res) => {
   const bathrooms = session.bathrooms || 1;
 
   try {
-    const apiResponse = await axios.post('https://jolty-turpentinic-sonia.ngrok-free.dev/calculate-quote', {
+    const apiResponse = await axios.post('https://jma-bot.onrender.com/calculate-quote', {
       serviceType: bedroomsToServiceType(bedrooms),
       sqft,
       bathrooms,
@@ -317,7 +317,7 @@ app.post('/whatsapp', async (req, res) => {
     session.sqft = number;
 
     try {
-      const apiResponse = await axios.post('https://jolty-turpentinic-sonia.ngrok-free.dev/calculate-quote', {
+      const apiResponse = await axios.post('https://jma-bot.onrender.com/calculate-quote', {
         serviceType: bedroomsToServiceType(session.bedrooms),
         sqft: session.sqft,
         bathrooms: session.bathrooms,
@@ -381,6 +381,6 @@ app.post('/whatsapp', async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log('Server running on port 3000');
+app.listen(PORT, () => {
+  console.log('Server running on port ' + PORT);
 });
