@@ -112,18 +112,12 @@ function bedroomsToServiceType(bedrooms) {
 // ── Step 1: Welcome → Ask for bedrooms ──
 app.all('/voice', (req, res) => {
   const callerId = req.body?.From || 'unknown';
-  const isRetry = req.query?.retry === 'true';
+  sessions[callerId] = {}; // Reset session
 
-  if (!isRetry) {
-    sessions[callerId] = { retry: 0 };
-    console.log("Voice Call Started:", callerId);
-  }
+  console.log(`[Voice] Call Started - Caller: ${callerId}`);
 
   const twiml = new VoiceResponse();
-  
-  if (!isRetry) {
-    twiml.say({ voice: 'alice' }, 'Hello, welcome to JMA Cleaning. I will help you get a quick quote.');
-  }
+  twiml.say({ voice: 'alice' }, 'Hello, welcome to JMA Cleaning. I will help you get a quick quote.');
 
   const gather = twiml.gather({
     input: 'speech dtmf',
@@ -135,16 +129,8 @@ app.all('/voice', (req, res) => {
   });
   gather.say({ voice: 'alice' }, 'How many bedrooms does your place have? Say zero for a studio.');
 
-  // Fallback if no input captured
-  if (!sessions[callerId] || sessions[callerId].retry < 1) {
-    if (!sessions[callerId]) sessions[callerId] = { retry: 0 };
-    sessions[callerId].retry++;
-    twiml.say({ voice: 'alice' }, "I didn't catch that.");
-    twiml.redirect(`${BASE_URL}/voice?retry=true`);
-  } else {
-    twiml.say({ voice: 'alice' }, "Sorry, I didn't hear anything. Goodbye.");
-    twiml.hangup();
-  }
+  // Fallback if Gather times out
+  twiml.say({ voice: 'alice' }, "I didn't catch that, please try again.");
 
   res.type('text/xml');
   res.send(twiml.toString());
@@ -155,39 +141,33 @@ app.post('/voice/step-bedrooms', (req, res) => {
   const callerId = req.body?.From || 'unknown';
   const input = req.body?.Digits || req.body?.SpeechResult;
   
+  console.log(`[Voice] Step Bedrooms - Caller: ${callerId}, Input: ${input}`);
   console.log("Speech:", req.body?.SpeechResult);
   console.log("Digits:", req.body?.Digits);
 
   const bedrooms = extractNumber(input);
   const twiml = new VoiceResponse();
 
-  if (!sessions[callerId]) sessions[callerId] = { retry: 0 };
-
   if (bedrooms === null) {
-    if (sessions[callerId].retry < 1) {
-      sessions[callerId].retry++;
-      twiml.say({ voice: 'alice' }, "I didn't catch that, please try again.");
-      const gather = twiml.gather({
-        input: 'speech dtmf',
-        timeout: 5,
-        action: `${BASE_URL}/voice/step-bedrooms`,
-        method: 'POST',
-        speechTimeout: 'auto',
-        language: 'en-US'
-      });
-      gather.say({ voice: 'alice' }, 'How many bedrooms? Say zero for a studio.');
-    } else {
-      twiml.say({ voice: 'alice' }, "Sorry, I'm having trouble hearing you. Goodbye.");
-      twiml.hangup();
-    }
+    const gather = twiml.gather({
+      input: 'speech dtmf',
+      timeout: 5,
+      action: `${BASE_URL}/voice/step-bedrooms`,
+      method: 'POST',
+      speechTimeout: 'auto',
+      language: 'en-US'
+    });
+    gather.say({ voice: 'alice' }, "I didn't catch that. How many bedrooms? Say zero for a studio.");
+    
     res.type('text/xml');
     return res.send(twiml.toString());
   }
 
+  if (!sessions[callerId]) sessions[callerId] = {};
   sessions[callerId].bedrooms = bedrooms;
-  sessions[callerId].retry = 0; // reset retry for next step
 
   twiml.say({ voice: 'alice' }, `Got it, ${bedrooms === 0 ? 'a studio' : bedrooms + ' bedroom' + (bedrooms > 1 ? 's' : '')}.`);
+  
   const gather = twiml.gather({
     input: 'speech dtmf',
     timeout: 5,
@@ -207,39 +187,33 @@ app.post('/voice/step-bathrooms', (req, res) => {
   const callerId = req.body?.From || 'unknown';
   const input = req.body?.Digits || req.body?.SpeechResult;
   
+  console.log(`[Voice] Step Bathrooms - Caller: ${callerId}, Input: ${input}`);
   console.log("Speech:", req.body?.SpeechResult);
   console.log("Digits:", req.body?.Digits);
 
   const bathrooms = extractNumber(input);
   const twiml = new VoiceResponse();
 
-  if (!sessions[callerId]) sessions[callerId] = { retry: 0 };
-
   if (bathrooms === null) {
-    if (sessions[callerId].retry < 1) {
-      sessions[callerId].retry++;
-      twiml.say({ voice: 'alice' }, "I didn't catch that, please try again.");
-      const gather = twiml.gather({
-        input: 'speech dtmf',
-        timeout: 5,
-        action: `${BASE_URL}/voice/step-bathrooms`,
-        method: 'POST',
-        speechTimeout: 'auto',
-        language: 'en-US'
-      });
-      gather.say({ voice: 'alice' }, 'How many bathrooms do you have?');
-    } else {
-      twiml.say({ voice: 'alice' }, "Sorry, I'm having trouble hearing you. Goodbye.");
-      twiml.hangup();
-    }
+    const gather = twiml.gather({
+      input: 'speech dtmf',
+      timeout: 5,
+      action: `${BASE_URL}/voice/step-bathrooms`,
+      method: 'POST',
+      speechTimeout: 'auto',
+      language: 'en-US'
+    });
+    gather.say({ voice: 'alice' }, "I didn't catch that. How many bathrooms do you have?");
+    
     res.type('text/xml');
     return res.send(twiml.toString());
   }
 
+  if (!sessions[callerId]) sessions[callerId] = {};
   sessions[callerId].bathrooms = bathrooms;
-  sessions[callerId].retry = 0; // reset retry for next step
 
   twiml.say({ voice: 'alice' }, `Got it, ${bathrooms} bathroom${bathrooms !== 1 ? 's' : ''}.`);
+  
   const gather = twiml.gather({
     input: 'speech dtmf',
     timeout: 5,
@@ -259,31 +233,24 @@ app.post('/voice/step-sqft', async (req, res) => {
   const callerId = req.body?.From || 'unknown';
   const input = req.body?.Digits || req.body?.SpeechResult;
   
+  console.log(`[Voice] Step Sqft - Caller: ${callerId}, Input: ${input}`);
   console.log("Speech:", req.body?.SpeechResult);
   console.log("Digits:", req.body?.Digits);
 
   const sqft = extractNumber(input);
   const twiml = new VoiceResponse();
 
-  if (!sessions[callerId]) sessions[callerId] = { retry: 0 };
-
   if (sqft === null || sqft <= 0) {
-    if (sessions[callerId].retry < 1) {
-      sessions[callerId].retry++;
-      twiml.say({ voice: 'alice' }, "I didn't catch that, please try again.");
-      const gather = twiml.gather({
-        input: 'speech dtmf',
-        timeout: 5,
-        action: `${BASE_URL}/voice/step-sqft`,
-        method: 'POST',
-        speechTimeout: 'auto',
-        language: 'en-US'
-      });
-      gather.say({ voice: 'alice' }, 'What is the square footage?');
-    } else {
-      twiml.say({ voice: 'alice' }, "Sorry, I'm having trouble hearing you. Goodbye.");
-      twiml.hangup();
-    }
+    const gather = twiml.gather({
+      input: 'speech dtmf',
+      timeout: 5,
+      action: `${BASE_URL}/voice/step-sqft`,
+      method: 'POST',
+      speechTimeout: 'auto',
+      language: 'en-US'
+    });
+    gather.say({ voice: 'alice' }, "I didn't catch that. What is the square footage?");
+
     res.type('text/xml');
     return res.send(twiml.toString());
   }
