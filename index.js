@@ -96,6 +96,15 @@ app.post('/calculate-quote', (req, res) => {
 });
 
 // ── Twilio Voice Webhook ──
+app.get('/voice', (req, res) => {
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Hello, welcome to JMA Cleaning. Please call us to speak with our assistant.</Say>
+</Response>`;
+  res.type('text/xml');
+  res.send(twiml);
+});
+
 app.post('/voice', (req, res) => {
   const twiml = new VoiceResponse();
   const connect = twiml.connect();
@@ -357,17 +366,6 @@ wss.on('connection', (ws) => {
         }
       };
       openAiWs.send(JSON.stringify(sessionUpdate));
-
-      // Trigger initial greeting
-      setTimeout(() => {
-        const initialGreeting = {
-          type: 'response.create',
-          response: {
-            instructions: 'Greet the user warmly and ask how you can help them with their cleaning needs today.'
-          }
-        };
-        openAiWs.send(JSON.stringify(initialGreeting));
-      }, 500);
     });
 
     openAiWs.on('message', async (data) => {
@@ -452,6 +450,17 @@ wss.on('connection', (ws) => {
       case 'start':
         streamSid = message.start.streamSid;
         console.log(`[Twilio] Stream Started: ${streamSid}`);
+        // Trigger greeting only after Twilio media stream is fully ready
+        setTimeout(() => {
+          if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
+            openAiWs.send(JSON.stringify({
+              type: 'response.create',
+              response: {
+                instructions: 'Greet the caller warmly and ask how you can help with cleaning services today.'
+              }
+            }));
+          }
+        }, 1000);
         break;
       case 'media':
         // Forward audio to OpenAI
