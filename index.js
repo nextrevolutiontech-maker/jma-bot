@@ -55,17 +55,17 @@ HANDOFF:
 - If the user is angry, confused, or asks for a human, say you'll transfer them or take a message.
 
 LANGUAGE:
-- Speak ONLY in English at all times.
-- Use a professional, neutral American accent.
-- Never switch languages, even if the caller speaks another language.
-- If the caller speaks a non-English language, politely respond in English and ask if they can continue in English.
+- Detect the caller's language from their first sentence.
+- Continue the conversation in the same language naturally.
+- Use a professional and friendly tone.
+- If the language is unclear, politely ask which language they prefer.
 
 CONSTRAINTS:
 - Keep responses concise for low latency.
 - Do not repeat questions if already answered.
 `;
 
-const VOICE = 'verse'; // Options: alloy, echo, shimmer
+const VOICE = 'shimmer'; // Options: alloy, echo, shimmer, verse
 
 // ── Cleaning Service Pricing Logic (Internal API) ──
 app.post('/calculate-quote', (req, res) => {
@@ -364,7 +364,7 @@ wss.on('connection', (ws) => {
 
       // Handle function calls
       if (response.type === 'response.done') {
-        const output = response.response.output;
+        const output = response?.response?.output || [];
         for (const item of output) {
           if (item.type === 'function_call') {
             const { name, arguments: argsString, call_id } = item;
@@ -447,7 +447,7 @@ wss.on('connection', (ws) => {
               }
             }));
           }
-        }, 1000);
+        }, 1500);
         break;
       case 'media':
         // Forward audio to OpenAI
