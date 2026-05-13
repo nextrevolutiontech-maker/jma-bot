@@ -310,10 +310,10 @@ wss.on('connection', (ws) => {
 
   // Initialize OpenAI Realtime Connection
   const connectToOpenAI = () => {
-    openAiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01', {
+    openAiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'realtime=v1'
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "OpenAI-Beta": "realtime=v1"
       }
     });
 
@@ -321,55 +321,29 @@ wss.on('connection', (ws) => {
       console.log('[OpenAI] Connected');
       
       // Send session configuration
+      // Minimal session config — tools and turn_detection removed to isolate disconnect cause
       const sessionUpdate = {
         type: 'session.update',
         session: {
           instructions: SYSTEM_MESSAGE,
           voice: VOICE,
           input_audio_format: 'g711_ulaw',
-          output_audio_format: 'g711_ulaw',
-          turn_detection: { type: 'server_vad' },
-          tools: [
-            {
-              type: 'function',
-              name: 'calculate_quote',
-              description: 'Calculates a cleaning quote based on user details.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  serviceType: { type: 'string', enum: ['studio', '1bed', '2bed', '3bed'] },
-                  sqft: { type: 'number' },
-                  bathrooms: { type: 'number' },
-                  condition: { type: 'string', enum: ['light', 'normal', 'heavy'] },
-                  extras: { type: 'array', items: { type: 'string' } }
-                },
-                required: ['serviceType', 'sqft', 'bathrooms']
-              }
-            },
-            {
-              type: 'function',
-              name: 'book_service',
-              description: 'Saves the booking details to the database.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  name: { type: 'string' },
-                  phone: { type: 'string' },
-                  address: { type: 'string' },
-                  date: { type: 'string' },
-                  details: { type: 'string' }
-                },
-                required: ['name', 'address', 'date']
-              }
-            }
-          ]
+          output_audio_format: 'g711_ulaw'
         }
       };
       openAiWs.send(JSON.stringify(sessionUpdate));
     });
 
     openAiWs.on('message', async (data) => {
-      const response = JSON.parse(data);
+      let response;
+
+      try {
+        const messageString = data.toString();
+        response = JSON.parse(messageString);
+      } catch (err) {
+        console.error('[OpenAI] Failed to parse websocket message:', err);
+        return;
+      }
 
       // Handle audio from OpenAI
       if (response.type === 'response.audio.delta' && response.delta) {
@@ -432,19 +406,26 @@ wss.on('connection', (ws) => {
       }
     });
 
-    openAiWs.on('close', () => {
-      console.log('[OpenAI] Disconnected');
+    openAiWs.on('close', (code, reason) => {
+      console.error('[OpenAI] Closed:', code, reason?.toString());
     });
 
     openAiWs.on('error', (error) => {
-      console.error('[OpenAI] Error:', error);
+      console.error('[OpenAI] WebSocket Error:', error);
     });
   };
 
   connectToOpenAI();
 
   ws.on('message', (data) => {
-    const message = JSON.parse(data);
+    let message;
+
+    try {
+      message = JSON.parse(data.toString());
+    } catch (err) {
+      console.error('[Twilio] Failed to parse websocket message:', err);
+      return;
+    }
 
     switch (message.event) {
       case 'start':
