@@ -56,10 +56,28 @@ BEHAVIOR:
    - Condition of the place (Light, Normal, Heavy)
    - Extras (Fridge, Oven)
 4. Once you have enough details, use the "calculate_quote" tool to get a price.
-5. Present the price clearly and suggest extras if they haven't picked any.
+5. After presenting the price, naturally guide the caller toward extras using the UPSELLING guidelines below.
 6. Ask if they'd like to schedule the booking.
 7. If they say yes, collect their full name, address, and preferred date/time.
 8. Finally, use the "book_service" tool to save the booking.
+
+UPSELLING:
+- After presenting the quote, naturally recommend relevant extras the caller hasn't selected.
+- Be consultative, not pushy — frame extras as a helpful suggestion, not a hard sell.
+- Tailor recommendations to the service type:
+  * Move-out or Airbnb: "Most of our move-out clients include both fridge and oven cleaning for a more thorough result."
+  * Regular or Deep: "Many customers also add fridge cleaning — it really completes the kitchen."
+- If they haven't mentioned extras at all, gently introduce the option: "By the way, we also offer fridge and oven deep cleaning for just a small addition."
+- Only suggest extras ONCE. If the caller declines, accept gracefully and move on.
+
+PRICE HANDLING:
+- If the caller hesitates, says "too expensive", "maybe later", or seems unsure:
+  * Acknowledge their concern calmly: "I completely understand."
+  * Reassure them: "We can absolutely keep it to the standard package."
+  * Gently reinforce value: "I just wanted to mention the option while we're scheduling your visit."
+  * Offer flexibility: "We can always add extras later if you change your mind."
+- NEVER pressure the caller. Sound understanding and confident.
+- If they decline the entire service, thank them warmly and let them know they can call back anytime.
 
 TOOL USAGE:
 - IMPORTANT: Before calling any tool, ALWAYS say a brief natural filler first.
@@ -330,10 +348,20 @@ wss.on('connection', (ws) => {
 
   let streamSid = null;
   let openAiWs = null;
+  let isResponsePending = false; // Lightweight response overlap guard
+
+  // Safe WebSocket send helper
+  const safeSend = (wsConn, payload) => {
+    if (wsConn && wsConn.readyState === WebSocket.OPEN) {
+      wsConn.send(JSON.stringify(payload));
+      return true;
+    }
+    return false;
+  };
 
   // Initialize OpenAI Realtime Connection
   const connectToOpenAI = () => {
-    openAiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
+    openAiWs = new WebSocket('wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview', {
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
         "OpenAI-Beta": "realtime=v1"
@@ -354,7 +382,7 @@ wss.on('connection', (ws) => {
           output_audio_format: 'g711_ulaw'
         }
       };
-      openAiWs.send(JSON.stringify(sessionUpdate));
+      safeSend(openAiWs, sessionUpdate);
     });
 
     openAiWs.on('message', async (data) => {
@@ -366,6 +394,14 @@ wss.on('connection', (ws) => {
       } catch (err) {
         console.error('[OpenAI] Failed to parse websocket message:', err);
         return;
+      }
+
+      // Track response completion for overlap prevention
+      if (response.type === 'response.done' || response.type === 'response.cancelled') {
+        isResponsePending = false;
+      }
+      if (response.type === 'response.created') {
+        isResponsePending = true;
       }
 
       // Handle audio from OpenAI
@@ -398,12 +434,12 @@ wss.on('connection', (ws) => {
               console.log('[AI] Calculating quote:', args);
 
               // Immediately speak a filler so the caller doesn't hear silence
-              openAiWs.send(JSON.stringify({
+              safeSend(openAiWs, {
                 type: 'response.create',
                 response: {
                   instructions: 'Briefly say: "One moment while I prepare your estimate." Keep it natural and concise.'
                 }
-              }));
+              });
 
               // Short delay to let the filler audio start playing
               await new Promise(resolve => setTimeout(resolve, 400));
@@ -421,15 +457,19 @@ wss.on('connection', (ws) => {
             }
 
             // Send tool result back to OpenAI
-            const toolResponse = {
+            safeSend(openAiWs, {
               type: 'conversation.item.create',
               item: {
                 type: 'function_call_output',
                 call_id: call_id,
                 output: JSON.stringify(functionResult)
               }
-            };
-            openAiWs.send(JSON.stringify(toolResponse));
+            });
+
+            // Wait for any pending filler response to complete before creating the main response
+            if (isResponsePending) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
             
             // Ask OpenAI to generate a response after tool execution
             const responseInstructions = name === 'calculate_quote'
@@ -442,7 +482,7 @@ wss.on('connection', (ws) => {
             if (responseInstructions) {
               createPayload.response = { instructions: responseInstructions };
             }
-            openAiWs.send(JSON.stringify(createPayload));
+            safeSend(openAiWs, createPayload);
           }
         }
       }
@@ -453,6 +493,7 @@ wss.on('connection', (ws) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ event: 'clear', streamSid: streamSid }));
         }
+        isResponsePending = false;
         // OpenAI natively stops audio generation when speech is detected via server_vad
       }
     });
@@ -484,25 +525,20 @@ wss.on('connection', (ws) => {
         console.log(`[Twilio] Stream Started: ${streamSid}`);
         // Trigger greeting only after Twilio media stream is fully ready
         setTimeout(() => {
-          if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
-            openAiWs.send(JSON.stringify({
-              type: 'response.create',
-              response: {
-                instructions: 'Greet the caller with a calm, warm, professional luxury concierge tone. Say: "Thank you for calling JMA Absolute Cleaning Services. How may I help you today?" Keep the tone polished, natural, and confident.'
-              }
-            }));
-          }
+          safeSend(openAiWs, {
+            type: 'response.create',
+            response: {
+              instructions: 'Greet the caller with a calm, warm, professional luxury concierge tone. Say: "Thank you for calling JMA Absolute Cleaning Services. How may I help you today?" Keep the tone polished, natural, and confident.'
+            }
+          });
         }, 1500);
         break;
       case 'media':
         // Forward audio to OpenAI
-        if (openAiWs && openAiWs.readyState === WebSocket.OPEN) {
-          const audioAppend = {
-            type: 'input_audio_buffer.append',
-            audio: message.media.payload
-          };
-          openAiWs.send(JSON.stringify(audioAppend));
-        }
+        safeSend(openAiWs, {
+          type: 'input_audio_buffer.append',
+          audio: message.media.payload
+        });
         break;
       case 'stop':
         console.log(`[Twilio] Stream Stopped: ${streamSid}`);
