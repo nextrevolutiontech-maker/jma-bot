@@ -61,6 +61,12 @@ BEHAVIOR:
 7. If they say yes, collect their full name, address, and preferred date/time.
 8. Finally, use the "book_service" tool to save the booking.
 
+TOOL USAGE:
+- IMPORTANT: Before calling any tool, ALWAYS say a brief natural filler first.
+- Examples: "One moment while I prepare your estimate.", "Let me check the pricing for you.", "Of course, let me quickly calculate that."
+- NEVER go silent while processing. The caller should always hear something before a pause.
+- After the tool returns a result, present the information naturally and conversationally.
+
 HANDOFF:
 - If the caller is frustrated, confused, or asks for a human, calmly say you'll connect them with a team member or take a message.
 
@@ -390,6 +396,18 @@ wss.on('connection', (ws) => {
             let functionResult;
             if (name === 'calculate_quote') {
               console.log('[AI] Calculating quote:', args);
+
+              // Immediately speak a filler so the caller doesn't hear silence
+              openAiWs.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                  instructions: 'Briefly say: "One moment while I prepare your estimate." Keep it natural and concise.'
+                }
+              }));
+
+              // Short delay to let the filler audio start playing
+              await new Promise(resolve => setTimeout(resolve, 400));
+
               try {
                 const quoteRes = await axios.post(`${BASE_URL}/calculate-quote`, args);
                 functionResult = { price: quoteRes.data.totalPrice };
@@ -414,7 +432,17 @@ wss.on('connection', (ws) => {
             openAiWs.send(JSON.stringify(toolResponse));
             
             // Ask OpenAI to generate a response after tool execution
-            openAiWs.send(JSON.stringify({ type: 'response.create' }));
+            const responseInstructions = name === 'calculate_quote'
+              ? 'Present the quote amount naturally and confidently. Suggest any extras they haven\'t selected. Ask if they\'d like to book.'
+              : name === 'book_service'
+              ? 'Confirm the booking warmly. Let them know a team member will follow up shortly.'
+              : undefined;
+            
+            const createPayload = { type: 'response.create' };
+            if (responseInstructions) {
+              createPayload.response = { instructions: responseInstructions };
+            }
+            openAiWs.send(JSON.stringify(createPayload));
           }
         }
       }
